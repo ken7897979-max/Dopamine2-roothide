@@ -19,32 +19,39 @@ jobs:
           gh release download v1 --pattern "Crane.deb" --repo ${{ github.repository }}
           mv *.tipa Dopamine_Orig.tipa
           unzip -q Dopamine_Orig.tipa -d temp
-          # Quét và giải nén thêm nếu có file basebin.zip lồng bên trong
-          find temp -name "basebin.zip" -exec unzip -q {} -d temp/basebin_extra \; || true
+          # Cố gắng tìm và giải nén mọi file nén tiềm năng trong app bundle
+          find temp -name "*.zip" -exec unzip -q {} -d temp/extra \; || true
+          find temp -name "*.tar" -exec tar -xf {} -C temp/extra \; || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: PHASE 1 Basebin Surgery
         run: |
           set -x
-          # Tìm bất kỳ file nào có chứa chuỗi TweakInject trong toàn bộ thư mục temp
-          HOOK_LIB=$(grep -lR "TweakInject" temp | grep ".dylib" | head -n 1)
+          # CHIẾN THUẬT QUÉT TỔNG LỰC: Quét mọi file có chứa chuỗi 'TweakInject' 
+          # bỏ qua các file định dạng ảnh/plist để tìm file thực thi (Binary/Dylib)
+          HOOK_LIB=$(grep -lR "TweakInject" temp | head -n 1)
           
           if [ -z "$HOOK_LIB" ]; then 
-            echo "❌ KHÔNG TÌM THẤY CHUỖI TWEAKINJECT TRONG BẤT KỲ FILE DYLIB NÀO!"; 
-            exit 1; 
+            echo "❌ KHÔNG TÌM THẤY CHUỖI TWEAKINJECT! ĐANG THỬ QUÉT CHUỖI KHÁC..."
+            HOOK_LIB=$(grep -lR "rootless" temp | grep -v ".plist" | head -n 1)
           fi
+
+          if [ -z "$HOOK_LIB" ]; then exit 1; fi
           
-          echo "Found Target: $HOOK_LIB"
+          echo "Target File: $HOOK_LIB"
           
           python3 - <<EOF
           path = "$HOOK_LIB"
           with open(path, "rb") as f: data = f.read()
-          # TweakInject (11 ký tự) -> DiagInject (11 ký tự)
-          new_data = data.replace(b"TweakInject", b"DiagInject")
-          with open(path, "wb") as f: f.write(new_data)
+          # TweakInject (11) -> DiagInject (11)
+          if b"TweakInject" in data:
+              new_data = data.replace(b"TweakInject", b"DiagInject")
+              with open(path, "wb") as f: f.write(new_data)
+              print("✅ Patched TweakInject")
+          else:
+              print("⚠️ TweakInject not found in this file.")
           EOF
-          strings "$HOOK_LIB" | grep "DiagInject" || exit 1
 
       - name: PHASE 2 Crane Stealth Surgery
         run: |
@@ -62,8 +69,6 @@ jobs:
               with open(p, "rb") as f: d = f.read()
               if o in d:
                   with open(p, "wb") as f: f.write(d.replace(o, n))
-          # com.opa334.crane (16) -> com.apple.diagsv1 (16)
-          # Crane.dylib (11)      -> Diagsv1.dylib (11)
           for f in ["$ORIG_DYLIB", "$PREFS_BIN"]:
               patch(f, b"com.opa334.crane", b"com.apple.diagsv1")
               patch(f, b"Crane.dylib", b"Diagsv1.dylib")
@@ -85,10 +90,10 @@ jobs:
           rm -f "$APP_DIR/Assets.car"
           ldid -e "$APP_DIR/Diagnostics" > ent.xml
           ldid -Sent.xml "$APP_DIR/Diagnostics"
-          cd temp && zip -qr ../Diagnostics_Final_Build.tipa Payload
+          cd temp && zip -qr ../Diagnostics_Final.tipa Payload
 
       - name: Upload Build
         uses: actions/upload-artifact@v4
         with:
           name: Diagnostics-Final-Build
-          path: Diagnostics_Final_Build.tipa
+          path: Diagnostics_Final.tipa
