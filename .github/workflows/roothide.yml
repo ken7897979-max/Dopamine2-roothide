@@ -36,7 +36,7 @@ jobs:
           EOF
           ldid -S "$HOOK_LIB"
 
-           - name: Phase 2 - Crane Surgery
+      - name: Phase 2 - Crane Surgery
         run: |
           set -x
           # Cài đặt trình giải nén zstd (Bắt buộc cho chuẩn nén mới của Crane)
