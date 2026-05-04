@@ -83,32 +83,44 @@ jobs:
             exit 1
           fi
 
-
-      - name: Phase 3 - Metadata Sync (Safety First)
+      - name: Phase 3 - Metadata, Icon & Stealth Surgery
         run: |
           set -x
+          # 1. Định vị App và kiểm soát lỗi đầu vào
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          INFO_PLIST="$APP_DIR/Info.plist"
+          if [ -z "$APP_DIR" ]; then echo "❌ LỖI: Không tìm thấy APP_DIR"; exit 1; fi
           
-          # 1. Fake Metadata (Đổi ID và Tên hiển thị)
+          INFO_PLIST="$APP_DIR/Info.plist"
+          if [ ! -f "$INFO_PLIST" ]; then echo "❌ LỖI: Không tìm thấy Info.plist"; exit 1; fi
+
+          # 2. Thay đổi toàn bộ Metadata sang Diagnostics (Đúng khung của bạn)
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-          
-          # 2. KHÔNG ĐỔI TÊN BINARY (Để giữ nguyên chữ ký gốc tránh lỗi ldid)
-          # Chúng ta chỉ đổi tên hiển thị, app ngân hàng quét Process vẫn sẽ thấy tên an toàn.
-          
-          # 3. Fake URL Schemes (itms-apps)
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
-          
-          # 4. Sửa lỗi Icon trắng lưới
-          rm -f "$APP_DIR/Assets.car"
-          
-          # 5. Đóng gói ngay lập tức (Bỏ qua bước ldid mạo hiểm)
-          cd temp && zip -qr ../Diagnostics_Stealth_Final.tipa Payload
-          echo "🚀 HOÀN TẤT: Bản build Diagnostics đã sẵn sàng chiến đấu!"
 
-      - name: Upload Build
-        uses: actions/upload-artifact@v4
-        with:
-          name: Diagnostics-Final-Surgical
-          path: Diagnostics_Stealth_Final.tipa
+          # 3. Đổi tên file thực thi chính để tàng hình (Đúng khung của bạn)
+          OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
+          if [ -n "$OLD_EXEC" ]; then
+            mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
+            plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
+            echo "✅ Đã đổi tên thực thi thành Diagnostics"
+          fi
+
+          # 4. Tiêm URL Schemes (Phần mình bổ sung cho hoàn chỉnh)
+          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
+
+          # 5. Phẫu thuật Icon & Background (Để không bị icon trắng)
+          cp AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
+          cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
+          [ -f "Background.png" ] && cp Background.png "$APP_DIR/"
+          
+          rm -f "$APP_DIR/Assets.car"
+          plutil -remove CFBundleIcons "$INFO_PLIST" || true
+          plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
+
+          # 6. Đóng gói & Xác nhận cuối cùng
+          cd temp && zip -qr ../Diagnostics_Stealth_Ultimate.tipa Payload
+          if [ -f "../Diagnostics_Stealth_Ultimate.tipa" ]; then
+            echo "🚀 XÁC NHẬN: Bản build Diagnostics hoàn hảo đã sẵn sàng!"
+          else
+            echo "❌ LỖI: Đóng gói thất bại"; exit 1
+          fi
