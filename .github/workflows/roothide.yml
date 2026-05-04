@@ -13,7 +13,7 @@ jobs:
       - name: Install Tools
         run: brew install ldid zstd xz
 
-      - name: PHASE 0 Download
+      - name: PHASE 0 - Download Assets
         run: |
           gh release download v1 --pattern "*.tipa" --repo ${{ github.repository }}
           gh release download v1 --pattern "Crane.deb" --repo ${{ github.repository }}
@@ -22,7 +22,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Phase 1 - Basebin Surgery
+      - name: PHASE 1 - Basebin Surgery
         run: |
           set -x
           HOOK_LIB=$(grep -lR "TweakInject" temp | head -n 1)
@@ -33,94 +33,70 @@ jobs:
           with open(path, "wb") as f: f.write(data.replace(b"TweakInject", b"DiagInject"))
           EOF
           ldid -S "$HOOK_LIB"
-      - name: Phase 2 - Crane Pro Core Surgery
+          echo "✅ Phase 1: Basebin vá thành công!"
+
+      - name: PHASE 2 - Crane Pro Surgery
         run: |
           set -x
-          # 1. Định vị App
-          APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
-          
-          # 2. Giải nén triệt để (Havoc Standard)
+          APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
           mkdir -p crane_work
           cp Crane.deb crane_work/
-          cd crane_work && ar x Crane.deb
-          zstd -d data.tar.zst --stdout > data.tar || true
-          tar -xf data.tar
+          cd crane_work
+          ar x Crane.deb
+          if [ -f "data.tar.zst" ]; then zstd -d data.tar.zst --stdout > data.tar; fi
+          tar -xf data.tar || tar -xf data.tar.gz || tar -xf data.tar.xz
           cd ..
-
-          # 3. TRUY TÌM TRÁI TIM 784K (libcrane.dylib)
-          # K-Sentinel Logic: Tìm file dylib có dung lượng lớn nhất trong toàn bộ gói
+          
           TARGET_DYLIB=$(find crane_work -name "*.dylib" -type f -exec ls -s {} + | sort -n -r | head -n 1 | awk '{print $2}')
-          
-          if [ -z "$TARGET_DYLIB" ]; then echo "❌ KHÔNG TÌM THẤY CORE DYLIB"; exit 1; fi
-          echo "🎯 ĐÃ KHÓA MỤC TIÊU 784K: $TARGET_DYLIB"
+          echo "🎯 Khóa mục tiêu Core: $TARGET_DYLIB"
 
-          # 4. PHẪU THUẬT BINARY (Python xử lý êm ái)
           python3 - <<EOF
-          import os
-          path = "$TARGET_DYLIB"
-          with open(path, "rb") as f: data = f.read()
-          # Vá Identifier (com.opa334.crane -> com.apple.diagsv1)
-          data = data.replace(b"com.opa334.crane", b"com.apple.diagsv1")
-          # Vá tên dylib nội bộ (libcrane.dylib -> libdiagsv1.dylib)
-          data = data.replace(b"libcrane.dylib", b"libdiagsv1.dylib")
-          with open(path, "wb") as f: f.write(data)
+          def patch(p, o, n):
+              with open(p, "rb") as f: d = f.read()
+              with open(p, "wb") as f: f.write(d.replace(o, n))
+          patch("$TARGET_DYLIB", b"com.opa334.crane", b"com.apple.diagsv1")
+          patch("$TARGET_DYLIB", b"libcrane.dylib", b"libdiagsv1.dylib")
+          patch("$TARGET_DYLIB", b"Crane.dylib", b"Diagsv1.dylib")
           EOF
-
-          # 5. TIÊM VÀ XỬ LÝ CHỮ KÝ (Fix lỗi ldid assert)
+          
           mkdir -p "$APP_DIR/DiagInject"
-          FINAL_PATH="$APP_DIR/DiagInject/libdiagsv1.dylib"
-          mv "$TARGET_DYLIB" "$FINAL_PATH"
-          
-          # Dùng lệnh ldid với cờ -s (viết thường) hoặc ký nhẹ để tránh crash ldid
-          echo "🛡️ ĐANG KÝ TÀNG HÌNH CHO: $FINAL_PATH"
-          ldid -s "$FINAL_PATH" || ldid -S "$FINAL_PATH" || echo "⚠️ Cảnh báo: ldid lỗi nhưng sẽ thử tiếp tục"
-          
-          # Bằng chứng xác nhận
-          if [ -f "$FINAL_PATH" ]; then
-            echo "✅ XÁC NHẬN: Core 784K đã được tàng hình thành công!"
-          else
-            echo "❌ LỖI: File biến mất sau khi di chuyển"
-            exit 1
-          fi
+          mv "$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
+          ldid -S "$APP_DIR/DiagInject/libdiagsv1.dylib"
+          echo "✅ Phase 2: Crane Pro vá thành công!"
 
-      - name: Phase 3 - Metadata, Icon & Stealth Surgery
+      - name: PHASE 3 - Metadata & Icon Injection
         run: |
           set -x
-          # 1. Định vị App và kiểm soát lỗi đầu vào
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DIR" ]; then echo "❌ LỖI: Không tìm thấy APP_DIR"; exit 1; fi
-          
           INFO_PLIST="$APP_DIR/Info.plist"
-          if [ ! -f "$INFO_PLIST" ]; then echo "❌ LỖI: Không tìm thấy Info.plist"; exit 1; fi
-
-          # 2. Thay đổi toàn bộ Metadata sang Diagnostics (Đúng khung của bạn)
-          plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
-          plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-
-          # 3. Đổi tên file thực thi chính để tàng hình (Đúng khung của bạn)
-          OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
-          if [ -n "$OLD_EXEC" ]; then
-            mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
-            plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
-            echo "✅ Đã đổi tên thực thi thành Diagnostics"
-          fi
-
-          # 4. Tiêm URL Schemes (Phần mình bổ sung cho hoàn chỉnh)
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
-
-          # 5. Phẫu thuật Icon & Background (Để không bị icon trắng)
+          
+          # Chép Icon Bánh Răng từ Repo (Đảm bảo bạn đã upload ảnh lên Repo)
           cp AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
           cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
           [ -f "Background.png" ] && cp Background.png "$APP_DIR/"
+
+          # Phẫu thuật Metadata tàng hình
+          plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
+          plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
+          
+          # Đổi tên Binary thực thi chính (An toàn cho chữ ký)
+          OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
+          mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
+          plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
+          
+          # Fake URL Schemes (itms-apps)
+          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
           
           rm -f "$APP_DIR/Assets.car"
           plutil -remove CFBundleIcons "$INFO_PLIST" || true
           plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
 
-          # 6. Đóng gói & Xác nhận cuối cùng
-          cd temp && zip -qr ../Diagnostics_Stealth_Ultimate.tipa Payload
-          if [ -f "../Diagnostics_Stealth_Ultimate.tipa" ]; then
-            echo "🚀 XÁC NHẬN: Bản build Diagnostics hoàn hảo đã sẵn sàng!"
-          else
-            echo "❌ LỖI: Đóng gói thất bại"; exit 1
-          fi
+          # 🚀 Đóng gói (Sửa lỗi đường dẫn khiến không có file tải về)
+          zip -qr Diagnostics_Stealth_Final.tipa temp/Payload
+          echo "✅ Phase 3: Đóng gói hoàn tất!"
+
+      - name: 📥 Upload Final Tipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Diagnostics-Ultimate-Stealth
+          path: Diagnostics_Stealth_Final.tipa
