@@ -36,47 +36,65 @@ jobs:
           EOF
           ldid -S "$HOOK_LIB"
 
-      - name: Phase 2 - Crane Surgery
+           - name: Phase 2 - Crane Surgery
         run: |
           set -x
+          # Cài đặt trình giải nén zstd (Bắt buộc cho chuẩn nén mới của Crane)
+          brew install zstd
+          
           APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
           if [ -z "$APP_DIR" ]; then
-          echo "Không tìm thấy thư mục APP_DIR"
-          exit 1
+            echo "❌ Không tìm thấy thư mục APP_DIR"
+            exit 1
           fi
-    
+          
           mkdir -p crane_work
           cp Crane.deb crane_work/
-          cd crane_work && ar x Crane.deb && tar -xf data.tar && cd ..
-    
-          # Tìm kiếm tệp tin Crane.dylib
-           DYLIB_P=$(find crane_work -name "Crane.dylib" -type f)
+          
+          # Giải nén deb và xử lý chuẩn data.tar.zst
+          cd crane_work
+          ar x Crane.deb
+          if [ -f "data.tar.zst" ]; then
+            zstd -d data.tar.zst -o data.tar
+          fi
+          tar -xf data.tar
+          cd ..
+          
+          # Tìm kiếm tệp tin Crane.dylib (Sử dụng head để lấy 1 kết quả duy nhất)
+          DYLIB_P=$(find crane_work -name "Crane.dylib" -type f | head -n 1)
           if [ -z "$DYLIB_P" ]; then
-          echo "Không tìm thấy tệp tin Crane.dylib"
-          exit 1
+            echo "❌ Không tìm thấy tệp tin Crane.dylib sau khi giải nén"
+            exit 1
           fi
-    
+          
           # Tìm kiếm tệp tin CranePrefs
-           PREFS_P=$(find crane_work -name "CranePrefs" -type f)
-    
-          # Tiến hành phẫu thuật chuỗi định danh
-          if [ -f "$DYLIB_P" ]; then
-          sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$DYLIB_P"
-          sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$DYLIB_P"
-          fi
-    
-          if [ -f "$PREFS_P" ]; then
-          sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$PREFS_P"
-          sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$PREFS_P"
-          fi
-    
+          PREFS_P=$(find crane_work -name "CranePrefs" -type f | head -n 1)
+          
+          # Dùng Python để vá Binary (Tránh lỗi 'illegal byte sequence' của sed)
+          python3 - <<EOF
+          import os
+          def patch(p, o, n):
+              if not p or not os.path.exists(p): return
+              with open(p, "rb") as f: d = f.read()
+              with open(p, "wb") as f: f.write(d.replace(o, n))
+          
+          # com.opa334.crane (16) -> com.apple.diagsv1 (16)
+          # Crane.dylib (11)      -> Diagsv1.dylib (11)
+          patch("$DYLIB_P", b"com.opa334.crane", b"com.apple.diagsv1")
+          patch("$DYLIB_P", b"Crane.dylib", b"Diagsv1.dylib")
+          if "$PREFS_P":
+              patch("$PREFS_P", b"com.opa334.crane", b"com.apple.diagsv1")
+              patch("$PREFS_P", b"Crane.dylib", b"Diagsv1.dylib")
+          EOF
+          
           # Tiêm vào vùng ngoại lệ đã tạo ở Phase 1
           mkdir -p "$APP_DIR/DiagInject"
           if [ -f "$DYLIB_P" ]; then
-          mv "$DYLIB_P" "$APP_DIR/DiagInject/Diagsv1.dylib"
-          ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
-          echo "XÁC NHẬN: Phase 2 tiêm Crane tàng hình thành công!"
+            mv "$DYLIB_P" "$APP_DIR/DiagInject/Diagsv1.dylib"
+            ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
+            echo "✅ XÁC NHẬN: Phase 2 tiêm Crane tàng hình thành công!"
           fi
+
 
       - name: Phase 3 - Packaging
         run: |
