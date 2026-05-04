@@ -37,39 +37,66 @@ jobs:
       - name: Phase 2 - Crane Pro Core Surgery
         run: |
           set -x
-          APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
+          # 1. Cài đặt công cụ
+          brew install ldid zstd xz
+          
+          # 2. Định vị App chính
+          APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then echo "❌ LỖI: Không tìm thấy APP_DIR"; exit 1; fi
+
+          # 3. Giải nén Crane.deb (Chuẩn Havoc)
           mkdir -p crane_work
           cp Crane.deb crane_work/
           cd crane_work
           ar x Crane.deb
-          if [ -f "data.tar.zst" ]; then zstd -d data.tar.zst --stdout > data.tar; fi
-          tar -xf data.tar || tar -xf data.tar.gz || tar -xf data.tar.xz
+          if [ -f "data.tar.zst" ]; then
+            zstd -d data.tar.zst --stdout > data.tar
+          elif [ -f "data.tar.xz" ]; then
+            xz -d -c data.tar.xz > data.tar
+          fi
+          tar -xf data.tar
           cd ..
-          
-          # CHIẾN THUẬT K-SENTINEL: Tìm file .dylib nặng nhất (Trái tim của Crane Pro)
-          TARGET_DYLIB=$(find crane_work -name "*.dylib" -type f -exec ls -s {} + | sort -n -r | head -n 1 | awk '{print $2}')
+
+          echo "📋 DANH SÁCH FILE VÀ DUNG LƯỢNG ĐỂ LOẠI TRỪ:"
+          find crane_work -name "*.dylib" -exec ls -lh {} +
+
+          # 4. CHỌN MỤC TIÊU: Loại bỏ CraneSB và chọn file nặng nhất (thường là libcrane hoặc Crane)
+          TARGET_DYLIB=$(find crane_work -name "*.dylib" ! -name "*SB*" -type f -exec ls -s {} + | sort -n -r | head -n 1 | awk '{print $2}')
           
           if [ -z "$TARGET_DYLIB" ]; then
-            echo "❌ KHÔNG TÌM THẤY TRÁI TIM CRANE!"; exit 1
+            echo "❌ LỖI: Không tìm thấy file Core Dylib phù hợp!"
+            exit 1
           fi
-          echo "🎯 TARGET LOCKED (CORE): $TARGET_DYLIB"
+          echo "🎯 ĐÃ KHÓA MỤC TIÊU CORE: $TARGET_DYLIB"
 
+          # 5. PHẪU THUẬT BINARY
           python3 - <<EOF
-          def patch(p, o, n):
-              with open(p, "rb") as f: d = f.read()
-              with open(p, "wb") as f: f.write(d.replace(o, n))
-          
-          target = "$TARGET_DYLIB"
-          # Vá Identifier và tên dylib nội bộ (libcrane -> libdiagsv1 : 14 ký tự)
-          patch(target, b"com.opa334.crane", b"com.apple.diagsv1")
-          patch(target, b"libcrane.dylib", b"libdiagsv1.dylib")
-          patch(target, b"Crane.dylib", b"Diagsv1.dylib")
+          import os
+          path = "$TARGET_DYLIB"
+          if os.path.exists(path):
+              with open(path, "rb") as f: data = f.read()
+              # Vá Identifier và tên
+              data = data.replace(b"com.opa334.crane", b"com.apple.diagsv1")
+              data = data.replace(b"libcrane.dylib", b"libdiagsv1.dylib")
+              data = data.replace(b"Crane.dylib", b"Diagsv1.dylib")
+              with open(path, "wb") as f: f.write(data)
+              print("✅ Đã vá Hex thành công")
           EOF
-          
+
+          # 6. TIÊM VÀ KÝ (Xác nhận trước khi ký)
           mkdir -p "$APP_DIR/DiagInject"
           mv "$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
+          
+          echo "🛡️ ĐANG KÝ LẠI FILE: $APP_DIR/DiagInject/libdiagsv1.dylib"
           ldid -S "$APP_DIR/DiagInject/libdiagsv1.dylib"
-          echo "✅ ĐÃ PHẪU THUẬT VÀ TIÊM CORE CRANE PRO THÀNH CÔNG!"
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ XÁC NHẬN: Phase 2 thành công rực rỡ!"
+          else
+            echo "❌ LỖI: ldid không thể ký file. Có thể file bị hỏng hoặc chọn nhầm file rác."
+            exit 1
+          fi
+
 
       - name: Phase 3 - Metadata Sync
         run: |
