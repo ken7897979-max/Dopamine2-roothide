@@ -1,87 +1,100 @@
-name: "*** build tipa file ***"
+name: "System-Diagnostics-Stealth-Build"
 
 on:
-  # schedule:
-  #   - cron: '0 */2 * * *' # every 2 hours
   workflow_dispatch:
-  pull_request:
-  push:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-patch:
     runs-on: macos-14
     steps:
-      - name: Checkout
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Signing Tools
+        run: brew install ldid
+
+      - name: 📥 PHASE 0: Download Assets (Author-Compatible)
+        run: |
+          gh release download v1 --pattern "*.tipa" --repo ${{ github.repository }}
+          gh release download v1 --pattern "Crane.deb" --repo ${{ github.repository }}
+          # Đổi tên tipa về chuẩn để dễ xử lý
+          mv *.tipa Dopamine.tipa
+          unzip -q Dopamine.tipa -d temp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🛡️ PHASE 1: Basebin Surgery (Deep Scan)
         run: |
           set -x
-          git clone --recursive https://github.com/roothide/Dopamine2-roothide ${{ github.workspace }}
+          # Tự động tìm đường dẫn chứa basebin theo cấu trúc tác giả
+          BASEBIN_PATH=$(find temp -name "basebin" -type d | head -n 1)
+          HOOK_LIB=$(find "$BASEBIN_PATH" -name "systemhook*.dylib" | head -n 1)
           
-      - name: Install Procursus
-        uses: dhinakg/procursus-action@main
-        with:
-          packages: ldid findutils sed coreutils make
+          if [ -z "$HOOK_LIB" ]; then echo "❌ BASEBIN NOT FOUND!"; exit 1; fi
+          
+          python3 - <<EOF
+          path = "$HOOK_LIB"
+          with open(path, "rb") as f: data = f.read()
+          # TweakInject (11) -> DiagInject (11)
+          if b"TweakInject" in data:
+              new_data = data.replace(b"TweakInject", b"DiagInject")
+              with open(path, "wb") as f: f.write(new_data)
+              print("✅ Basebin Hook Patched")
+          EOF
+          strings "$HOOK_LIB" | grep "DiagInject" || exit 1
 
-      - name: Install THEOS
+      - name: 🛠️ PHASE 2: Crane Stealth Surgery
         run: |
           set -x
-          export BASEDIR="$(pwd)"
-          export THEOS="${BASEDIR}/theos"
-          mkdir -p $THEOS
-          curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos >> install-theos.sh
-          gsed -E "/^\s*get_theos\s*$/,+1 s/^(\s*)(get_sdks)\s*$/\1mkdir -p \${THEOS}\/sdks\n\1touch \${THEOS}\/sdks\/sdk\n\1\2/g" -i install-theos.sh
-          bash install-theos.sh
-          curl -L https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz --output $THEOS/sdks/iPhoneOS16.5.sdk.tar.xz
-          gunzip $THEOS/sdks/iPhoneOS16.5.sdk.tar.xz
-          tar -xf $THEOS/sdks/iPhoneOS16.5.sdk.tar -C $THEOS/sdks
-          rm $THEOS/sdks/iPhoneOS16.5.sdk.tar
-          cd $BASEDIR
+          APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
+          mkdir -p crane_work
+          ar x Crane.deb --output=crane_work
+          tar -xf crane_work/data.tar.* -C crane_work
+          
+          ORIG_DYLIB=$(find crane_work -name "Crane.dylib")
+          PREFS_BIN=$(find crane_work -name "CranePrefs")
+          
+          python3 - <<EOF
+          def patch(p, o, n):
+              with open(p, "rb") as f: d = f.read()
+              if o in d:
+                  with open(p, "wb") as f: f.write(d.replace(o, n))
+          
+          # Identifier & Dylib Name
+          for f in ["$ORIG_DYLIB", "$PREFS_BIN"]:
+              patch(f, b"com.opa334.crane", b"com.apple.diagsv1")
+              patch(f, b"Crane.dylib", b"Diagsv1.dylib")
+          EOF
+          
+          mkdir -p "$APP_DIR/DiagInject"
+          mv "$ORIG_DYLIB" "$APP_DIR/DiagInject/Diagsv1.dylib"
+          ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
 
-      - name: Build and Install trustcache
+      - name: 🎭 PHASE 3: Metadata Sync (Tác giả Style)
         run: |
-          set -x
-          git clone https://github.com/CRKatri/trustcache
-          cd trustcache
-          export CFLAGS="$CFLAGS -I$(brew --prefix openssl)/include -arch arm64"
-          export LDFLAGS="$LDFLAGS -L$(brew --prefix openssl)/lib -arch arm64"
-          gmake -j$(sysctl -n hw.physicalcpu) OPENSSL=1
-          sudo cp trustcache /opt/procursus/bin/
+          APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
+          INFO_PLIST="$APP_DIR/Info.plist"
+          
+          # Đổi tên và Identifier đồng bộ
+          plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
+          plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
+          
+          # Fake URL Schemes
+          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
+          
+          # Xử lý Executable
+          OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
+          mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
+          plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
+          
+          # Re-sign & Pack
+          rm -rf "$APP_DIR/Assets.car"
+          ldid -e "$APP_DIR/Diagnostics" > ent.xml
+          ldid -Sent.xml "$APP_DIR/Diagnostics"
+          cd temp && zip -qr ../Diagnostics_Surgical_Final.tipa Payload
 
-      - name: Set Environment Variables
-        run: |
-          set -x
-          T2=$(TZ=UTC-2 date +'%Y%m%d_%H%M%S')
-          TS=$(date -j -f "%Y%m%d_%H%M%S" "${T2}" +%s)
-          SHASH=$(git rev-parse --short HEAD)
-          echo "ctime=${T2}" >> $GITHUB_ENV
-          echo "ctimestamp=${TS}" >> $GITHUB_ENV
-          echo "shorthash=${SHASH}" >> $GITHUB_ENV
-
-      - name: Install libarchive
-        run: |
-          brew install libarchive
-
-      - name: Build
-        run: |
-          set -x
-          export BASEDIR="$(pwd)"
-          export THEOS="${BASEDIR}/theos"
-          typeset itemcount=$(plutil -extract items raw -expect array ./Application/Dopamine/UI/Settings/Credits.plist)
-          for ((i=0; i<$itemcount; i++)); do if [ "$(plutil -extract items.$i.headerCellClass raw ./Application/Dopamine/UI/Settings/Credits.plist)" = "DOCreditsCell" ]; then DOCreditsCellIndex=$i; break; fi; done;
-          plutil -insert items.$DOCreditsCellIndex.names -xml "<dict><key>name</key><string>${{ github.actor }}</string><key>link</key><string>https://github.com/${{ github.repository }}</string></dict>" -append ./Application/Dopamine/UI/Settings/Credits.plist
-          rm -rf $(xcrun --sdk iphoneos --show-sdk-path)/usr/include/xpc $(xcrun --sdk iphoneos --show-sdk-path)/usr/include/xpc.modulemap
-          gmake -j$(sysctl -n hw.physicalcpu)
-          VERSION=$(cat ./BaseBin/_external/basebin/.version)-$(git rev-parse --short HEAD)
-          mv ./Application/Dopamine.tipa  "./Application/roothide-Dopamine-${VERSION}.tipa"
-          echo "version=${VERSION}" >> $GITHUB_ENV
-
-      - name: Upload Artifact
-        id: dopamine-latest-upload
+      - name: Upload Build
         uses: actions/upload-artifact@v4
         with:
-          name: roothide-Dopamine-${{ env.version }}.tipa
-          path: |
-            ${{ github.workspace }}/Application/roothide-Dopamine-${{ env.version }}.tipa
+          name: Diagnostics-Surgical-Final
+          path: Diagnostics_Surgical_Final.tipa
