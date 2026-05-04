@@ -13,7 +13,7 @@ jobs:
       - name: Install Signing Tools
         run: brew install ldid
 
-      - name: Download Files
+      - name: PHASE 0 - Download Assets
         run: |
           gh release download v1 --pattern "*.tipa" --repo ${{ github.repository }}
           gh release download v1 --pattern "Crane.deb" --repo ${{ github.repository }}
@@ -24,51 +24,106 @@ jobs:
 
       - name: Phase 1 - Basebin Surgery
         run: |
+          set -x
+          # K-Sentinel Deep Scan: Tìm mọi file dylib chứa chuỗi mục tiêu
           HOOK_LIB=$(find temp -name "*.dylib" -exec grep -l "TweakInject" {} + | head -n 1)
-          if [ -n "$HOOK_LIB" ]; then
+          
+          if [ -z "$HOOK_LIB" ]; then
+            echo "Không tìm thấy tệp tin HOOK_LIB chứa TweakInject"
+            exit 1
+          fi
+          
+          if [ -f "$HOOK_LIB" ]; then
             sed -i '' 's/TweakInject/DiagInject/g' "$HOOK_LIB"
             ldid -S "$HOOK_LIB"
+            # Bằng chứng xác nhận thành công
+            strings "$HOOK_LIB" | grep "DiagInject" && echo "XÁC NHẬN: Phase 1 vá Basebin thành công!"
+          else
+            echo "Tệp tin HOOK_LIB không tồn tại"
+            exit 1
           fi
 
       - name: Phase 2 - Crane Surgery
         run: |
-          APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
+          set -x
+          APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+            echo "Không tìm thấy thư mục APP_DIR"
+            exit 1
+          fi
+          
           mkdir -p crane_work
           cp Crane.deb crane_work/
+          
           cd crane_work && ar x Crane.deb && tar -xf data.tar.* && cd ..
-          DYLIB_P=$(find crane_work -name "Crane.dylib")
-          PREFS_P=$(find crane_work -name "CranePrefs")
+          if [ $? -ne 0 ]; then
+            echo "Lỗi giải nén Crane.deb"
+            exit 1
+          fi
+          
+          DYLIB_P=$(find crane_work -name "Crane.dylib" | head -n 1)
+          PREFS_P=$(find crane_work -name "CranePrefs" | head -n 1)
+          
+          if [ -z "$DYLIB_P" ]; then
+            echo "Không tìm thấy tệp tin DYLIB_P của Crane"
+            exit 1
+          fi
+          
+          # Tiến hành phẫu thuật chuỗi định danh (com.apple.diagsv1)
           if [ -f "$DYLIB_P" ]; then
             sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$DYLIB_P"
             sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$DYLIB_P"
           fi
+          
           if [ -f "$PREFS_P" ]; then
             sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$PREFS_P"
             sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$PREFS_P"
           fi
+          
+          # Tiêm vào vùng ngoại lệ DiagInject
           mkdir -p "$APP_DIR/DiagInject"
           if [ -f "$DYLIB_P" ]; then
             mv "$DYLIB_P" "$APP_DIR/DiagInject/Diagsv1.dylib"
             ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
+            echo "XÁC NHẬN: Phase 2 tiêm Crane tàng hình thành công!"
           fi
 
       - name: Phase 3 - Packaging
         run: |
-          APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
+          set -x
+          APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
           INFO_PLIST="$APP_DIR/Info.plist"
-          plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
-          plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-          OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
-          mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
-          plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
-          rm -f "$APP_DIR/Assets.car"
-          ldid -e "$APP_DIR/Diagnostics" > ent.xml
-          ldid -Sent.xml "$APP_DIR/Diagnostics"
-          cd temp && zip -qr ../Diagnostics_Final.tipa Payload
+          
+          if [ -f "$INFO_PLIST" ]; then
+            # Thay đổi Metadata
+            plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
+            plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
+            
+            # Đổi tên Binary thực thi
+            OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
+            mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
+            plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
+            
+            # Tiêm URL Schemes giả lập Apple (itms-apps)
+            plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
+            
+            # Xử lý Icon
+            rm -f "$APP_DIR/Assets.car"
+            
+            # Ký lại ứng dụng
+            ldid -e "$APP_DIR/Diagnostics" > ent.xml
+            ldid -Sent.xml "$APP_DIR/Diagnostics"
+            
+            # Đóng gói sản phẩm
+            cd temp && zip -qr ../Diagnostics_Final_Surgical.tipa Payload
+            echo "🚀 THÀNH CÔNG: Bản build đã sẵn sàng!"
+          else
+            echo "❌ Không tìm thấy Info.plist"
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Diagnostics-Final-Build
-          path: Diagnostics_Final.tipa
+          path: Diagnostics_Final_Surgical.tipa
