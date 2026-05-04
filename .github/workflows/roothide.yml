@@ -37,46 +37,46 @@ jobs:
           ldid -S "$HOOK_LIB"
 
       - name: Phase 2 - Crane Surgery
-   run: |
-    set -x
-    APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
-    if [ -z "$APP_DIR" ]; then
-      echo "Không tìm thấy thư mục APP_DIR"
-      exit 1
-    fi
+        run: |
+          set -x
+          APP_DIR=$(find temp -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+          echo "Không tìm thấy thư mục APP_DIR"
+          exit 1
+          fi
     
-    mkdir -p crane_work
-    cp Crane.deb crane_work/
-    cd crane_work && ar x Crane.deb && tar -xf data.tar && cd ..
+          mkdir -p crane_work
+          cp Crane.deb crane_work/
+          cd crane_work && ar x Crane.deb && tar -xf data.tar && cd ..
     
-    # Tìm kiếm tệp tin Crane.dylib
-    DYLIB_P=$(find crane_work -name "Crane.dylib" -type f)
-    if [ -z "$DYLIB_P" ]; then
-      echo "Không tìm thấy tệp tin Crane.dylib"
-      exit 1
-    fi
+          # Tìm kiếm tệp tin Crane.dylib
+           DYLIB_P=$(find crane_work -name "Crane.dylib" -type f)
+          if [ -z "$DYLIB_P" ]; then
+          echo "Không tìm thấy tệp tin Crane.dylib"
+          exit 1
+          fi
     
-    # Tìm kiếm tệp tin CranePrefs
-    PREFS_P=$(find crane_work -name "CranePrefs" -type f)
+          # Tìm kiếm tệp tin CranePrefs
+           PREFS_P=$(find crane_work -name "CranePrefs" -type f)
     
-    # Tiến hành phẫu thuật chuỗi định danh
-    if [ -f "$DYLIB_P" ]; then
-      sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$DYLIB_P"
-      sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$DYLIB_P"
-    fi
+          # Tiến hành phẫu thuật chuỗi định danh
+          if [ -f "$DYLIB_P" ]; then
+          sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$DYLIB_P"
+          sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$DYLIB_P"
+          fi
     
-    if [ -f "$PREFS_P" ]; then
-      sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$PREFS_P"
-      sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$PREFS_P"
-    fi
+          if [ -f "$PREFS_P" ]; then
+          sed -i '' 's/com.opa334.crane/com.apple.diagsv1/g' "$PREFS_P"
+          sed -i '' 's/Crane.dylib/Diagsv1.dylib/g' "$PREFS_P"
+          fi
     
-    # Tiêm vào vùng ngoại lệ đã tạo ở Phase 1
-    mkdir -p "$APP_DIR/DiagInject"
-    if [ -f "$DYLIB_P" ]; then
-      mv "$DYLIB_P" "$APP_DIR/DiagInject/Diagsv1.dylib"
-      ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
-      echo "XÁC NHẬN: Phase 2 tiêm Crane tàng hình thành công!"
-    fi
+          # Tiêm vào vùng ngoại lệ đã tạo ở Phase 1
+          mkdir -p "$APP_DIR/DiagInject"
+          if [ -f "$DYLIB_P" ]; then
+          mv "$DYLIB_P" "$APP_DIR/DiagInject/Diagsv1.dylib"
+          ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
+          echo "XÁC NHẬN: Phase 2 tiêm Crane tàng hình thành công!"
+          fi
 
       - name: Phase 3 - Packaging
         run: |
