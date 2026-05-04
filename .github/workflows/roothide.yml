@@ -25,28 +25,33 @@ jobs:
       - name: Phase 1 - Basebin Surgery
         run: |
           set -x
-          # CHIẾN THUẬT QUÉT MÙ: Tìm bất kỳ file nào chứa chuỗi TweakInject
-          # K-Sentinel sẽ lục soát mọi file thực thi (Binary/Dylib)
+          # Tìm file chứa TweakInject (Bản Roothide thường giấu trong file thực thi chính)
           HOOK_LIB=$(grep -lR "TweakInject" temp | head -n 1)
           
           if [ -z "$HOOK_LIB" ]; then
-            echo "⚠️ Không tìm thấy TweakInject, đang thử quét chuỗi 'rootless'..."
-            HOOK_LIB=$(grep -lR "rootless" temp | grep -v ".plist" | head -n 1)
-          fi
-          
-          if [ -z "$HOOK_LIB" ]; then
-            echo "❌ LỖI CHÍ MẠNG: Không tìm thấy mục tiêu vá trong gói TIPA!"
+            echo "❌ Không tìm thấy mục tiêu!"
             exit 1
           fi
           
           echo "🎯 ĐÃ TÌM THẤY MỤC TIÊU: $HOOK_LIB"
           
-          # Tiến hành phẫu thuật
-          sed -i '' 's/TweakInject/DiagInject/g' "$HOOK_LIB"
-          ldid -S "$HOOK_LIB"
+          # Dùng Python để vá Binary (An toàn hơn sed)
+          python3 - <<EOF
+          import os
+          path = "$HOOK_LIB"
+          with open(path, "rb") as f:
+              data = f.read()
+          # TweakInject (11) -> DiagInject (11)
+          if b"TweakInject" in data:
+              new_data = data.replace(b"TweakInject", b"DiagInject")
+              with open(path, "wb") as f:
+                  f.write(new_data)
+              print("✅ Vá thành công bằng Python")
+          EOF
           
-          # Xác nhận bằng chứng
-          strings "$HOOK_LIB" | grep "DiagInject" && echo "✅ XÁC NHẬN: Basebin đã được vá thành công!"
+          # Ký lại file sau khi vá
+          ldid -S "$HOOK_LIB"
+          strings "$HOOK_LIB" | grep "DiagInject" && echo "✅ XÁC NHẬN: Basebin đã được khai thông!"
 
       - name: Phase 2 - Crane Surgery
         run: |
