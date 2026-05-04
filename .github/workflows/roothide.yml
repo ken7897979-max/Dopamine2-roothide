@@ -25,57 +25,57 @@ jobs:
       - name: PHASE 1 Basebin Surgery
         run: |
           set -x
-          # Tìm file .dylib có chứa TweakInject (Bỏ qua file thực thi chính để tránh hỏng App)
+          # Tìm mục tiêu dylib hoặc file hệ thống
           HOOK_LIB=$(grep -lR "TweakInject" temp | grep ".dylib" | head -n 1)
-          
           if [ -z "$HOOK_LIB" ]; then
-            echo "⚠️ Không tìm thấy dylib chứa TweakInject, thử quét toàn bộ trừ file thực thi..."
-            HOOK_LIB=$(grep -lR "TweakInject" temp | grep -v "Payload/Dopamine.app/Dopamine" | head -n 1)
+            HOOK_LIB=$(grep -lR "TweakInject" temp | grep -v "/Dopamine.app/Dopamine" | head -n 1)
           fi
 
           if [ -n "$HOOK_LIB" ]; then
             echo "Target Found: $HOOK_LIB"
-            python3 - <<EOF
-            path = "$HOOK_LIB"
-            with open(path, "rb") as f: data = f.read()
-            if b"TweakInject" in data:
-                with open(path, "wb") as f: f.write(data.replace(b"TweakInject", b"DiagInject"))
-            EOF
+            # Sử dụng Python để patch
+            python3 - <<'PYTHON_EOF'
+import os
+path = os.environ.get('HOOK_PATH')
+if path and os.path.exists(path):
+    with open(path, 'rb') as f: data = f.read()
+    if b'TweakInject' in data:
+        with open(path, 'wb') as f: f.write(data.replace(b'TweakInject', b'DiagInject'))
+        print('✅ Patched TweakInject')
+PYTHON_EOF
             ldid -S "$HOOK_LIB"
-          else
-            echo "⏭️ Skip Phase 1 (No dylib to patch)"
           fi
+        env:
+          HOOK_PATH: ${{ env.HOOK_LIB }}
 
       - name: PHASE 2 Crane Stealth Surgery
         run: |
           set -x
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
           mkdir -p crane_work
-          # Giải nén deb thủ công để tránh lỗi lệnh ar
           cp Crane.deb crane_work/
           cd crane_work && ar x Crane.deb && tar -xf data.tar.* && cd ..
           
           ORIG_DYLIB=$(find crane_work -name "Crane.dylib")
           PREFS_BIN=$(find crane_work -name "CranePrefs")
           
-          python3 - <<EOF
-          import os
-          def patch(p, o, n):
-              if not (p and os.path.exists(p)): return
-              with open(p, "rb") as f: d = f.read()
-              with open(p, "wb") as f: f.write(d.replace(o, n))
+          export DYLIB_P="$ORIG_DYLIB"
+          export PREFS_P="$PREFS_BIN"
           
-          # com.opa334.crane (16) -> com.apple.diagsv1 (16)
-          # Crane.dylib (11)      -> Diagsv1.dylib (11)
-          patch("$ORIG_DYLIB", b"com.opa334.crane", b"com.apple.diagsv1")
-          patch("$ORIG_DYLIB", b"Crane.dylib", b"Diagsv1.dylib")
-          patch("$PREFS_BIN", b"com.opa334.crane", b"com.apple.diagsv1")
-          patch("$PREFS_BIN", b"Crane.dylib", b"Diagsv1.dylib")
-          EOF
+          python3 - <<'PYTHON_EOF'
+import os
+def patch(p, o, n):
+    if p and os.path.exists(p):
+        with open(p, 'rb') as f: d = f.read()
+        with open(p, 'wb') as f: f.write(d.replace(o, n))
+patch(os.environ.get('DYLIB_P'), b'com.opa334.crane', b'com.apple.diagsv1')
+patch(os.environ.get('DYLIB_P'), b'Crane.dylib', b'Diagsv1.dylib')
+patch(os.environ.get('PREFS_P'), b'com.opa334.crane', b'com.apple.diagsv1')
+patch(os.environ.get('PREFS_P'), b'Crane.dylib', b'Diagsv1.dylib')
+PYTHON_EOF
           
           mkdir -p "$APP_DIR/DiagInject"
-          mv "$ORIG_DYLIB" "$APP_DIR/DiagInject/Diagsv1.dylib"
-          ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
+          [ -f "$ORIG_DYLIB" ] && mv "$ORIG_DYLIB" "$APP_DIR/DiagInject/Diagsv1.dylib" && ldid -S "$APP_DIR/DiagInject/Diagsv1.dylib"
 
       - name: PHASE 3 Metadata Sync
         run: |
@@ -83,20 +83,17 @@ jobs:
           INFO_PLIST="$APP_DIR/Info.plist"
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-          
           OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
           mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
           plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
-          
           plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
           rm -f "$APP_DIR/Assets.car"
-          
           ldid -e "$APP_DIR/Diagnostics" > ent.xml
           ldid -Sent.xml "$APP_DIR/Diagnostics"
-          cd temp && zip -qr ../Diagnostics_Final_V6.tipa Payload
+          cd temp && zip -qr ../Diagnostics_Final_V8.tipa Payload
 
       - name: Upload Build
         uses: actions/upload-artifact@v4
         with:
-          name: Diagnostics-Final-V6
-          path: Diagnostics_Final_V6.tipa
+          name: Diagnostics-Final-V8
+          path: Diagnostics_Final_V8.tipa
