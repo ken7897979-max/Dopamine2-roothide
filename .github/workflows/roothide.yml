@@ -10,7 +10,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Advanced Tools
+      - name: Install Tools
         run: brew install ldid zstd xz
 
       - name: PHASE 0 Download
@@ -25,7 +25,6 @@ jobs:
       - name: Phase 1 - Basebin Surgery
         run: |
           set -x
-          # Vá Basebin tạo ngoại lệ DiagInject
           HOOK_LIB=$(grep -lR "TweakInject" temp | head -n 1)
           if [ -z "$HOOK_LIB" ]; then HOOK_LIB=$(grep -lR "rootless" temp | grep -v ".plist" | head -n 1); fi
           python3 - <<EOF
@@ -35,7 +34,7 @@ jobs:
           EOF
           ldid -S "$HOOK_LIB"
 
-      - name: Phase 2 - Havoc Pro Precise Surgery
+      - name: Phase 2 - Crane Pro Core Surgery
         run: |
           set -x
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
@@ -43,38 +42,36 @@ jobs:
           cp Crane.deb crane_work/
           cd crane_work
           ar x Crane.deb
-          # Xử lý đa định dạng nén
           if [ -f "data.tar.zst" ]; then zstd -d data.tar.zst --stdout > data.tar; fi
           tar -xf data.tar || tar -xf data.tar.gz || tar -xf data.tar.xz
           cd ..
           
-          # TRUY QUÉT MỤC TIÊU DỰA TRÊN DỮ LIỆU NGƯỜI DÙNG CUNG CẤP
-          # Ưu tiên file libcrane.dylib trong thư mục pkgmirror
-          TARGET_DYLIB=$(find crane_work -name "libcrane.dylib" -type f | head -n 1)
+          # CHIẾN THUẬT K-SENTINEL: Tìm file .dylib nặng nhất (Trái tim của Crane Pro)
+          TARGET_DYLIB=$(find crane_work -name "*.dylib" -type f -exec ls -s {} + | sort -n -r | head -n 1 | awk '{print $2}')
           
           if [ -z "$TARGET_DYLIB" ]; then
-            echo "⚠️ Không tìm thấy theo đường dẫn, chuyển sang quét nội dung..."
-            TARGET_DYLIB=$(grep -lR "com.opa334.crane" crane_work | grep ".dylib" | head -n 1)
+            echo "❌ KHÔNG TÌM THẤY TRÁI TIM CRANE!"; exit 1
           fi
-
-          if [ -z "$TARGET_DYLIB" ]; then exit 1; fi
-          echo "🎯 TARGET LOCKED: $TARGET_DYLIB"
+          echo "🎯 TARGET LOCKED (CORE): $TARGET_DYLIB"
 
           python3 - <<EOF
           def patch(p, o, n):
               with open(p, "rb") as f: d = f.read()
               with open(p, "wb") as f: f.write(d.replace(o, n))
           
-          # Vá ID và tên dylib nội bộ (libcrane -> libdiagsv1 : 14 ký tự)
-          patch("$TARGET_DYLIB", b"com.opa334.crane", b"com.apple.diagsv1")
-          patch("$TARGET_DYLIB", b"libcrane.dylib", b"libdiagsv1.dylib")
+          target = "$TARGET_DYLIB"
+          # Vá Identifier và tên dylib nội bộ (libcrane -> libdiagsv1 : 14 ký tự)
+          patch(target, b"com.opa334.crane", b"com.apple.diagsv1")
+          patch(target, b"libcrane.dylib", b"libdiagsv1.dylib")
+          patch(target, b"Crane.dylib", b"Diagsv1.dylib")
           EOF
           
           mkdir -p "$APP_DIR/DiagInject"
           mv "$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
           ldid -S "$APP_DIR/DiagInject/libdiagsv1.dylib"
+          echo "✅ ĐÃ PHẪU THUẬT VÀ TIÊM CORE CRANE PRO THÀNH CÔNG!"
 
-      - name: Phase 3 - Packaging
+      - name: Phase 3 - Metadata Sync
         run: |
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
           INFO_PLIST="$APP_DIR/Info.plist"
@@ -87,10 +84,10 @@ jobs:
           rm -f "$APP_DIR/Assets.car"
           ldid -e "$APP_DIR/Diagnostics" > ent.xml
           ldid -Sent.xml "$APP_DIR/Diagnostics"
-          cd temp && zip -qr ../Diagnostics_Stealth_Ultimate.tipa Payload
+          cd temp && zip -qr ../Diagnostics_Stealth_Final.tipa Payload
 
       - name: Upload Build
         uses: actions/upload-artifact@v4
         with:
           name: Diagnostics-Final-Surgical
-          path: Diagnostics_Stealth_Ultimate.tipa
+          path: Diagnostics_Stealth_Final.tipa
