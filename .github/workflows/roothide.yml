@@ -33,25 +33,48 @@ jobs:
           with open(path, "wb") as f: f.write(data.replace(b"TweakInject", b"DiagInject"))
           EOF
           ldid -S "$HOOK_LIB"
-          echo "✅ Phase 1: Basebin vá thành công!"
+          echo "Phase 1: Basebin vá thành công!"
 
       - name: PHASE 2 - Crane Pro Surgery
         run: |
           set -x
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+            echo "Không tìm thấy APP_DIR"
+            exit 1
+          fi
+
           mkdir -p crane_work
           cp Crane.deb crane_work/
           cd crane_work
           ar x Crane.deb
-          zstd -d data.tar.zst --stdout > data.tar || true
-          tar -xf data.tar || tar -xf data.tar.gz || tar -xf data.tar.xz
+          if [ -f "data.tar.zst" ]; then
+            zstd -d data.tar.zst --stdout > data.tar
+          elif [ -f "data.tar" ]; then
+            :
+          else
+            echo "Không tìm thấy tệp tin data.tar"
+            exit 1
+          fi
+
+          if [ -f "data.tar" ]; then
+            tar -xf data.tar
+          elif [ -f "data.tar.gz" ]; then
+            tar -xf data.tar.gz
+          elif [ -f "data.tar.xz" ]; then
+            tar -xf data.tar.xz
+          else
+            echo "Không tìm thấy tệp tin data.tar"
+            exit 1
+          fi
           cd ..
-          
-          # 🎯 KHÓA MỤC TIÊU: Chỉ tìm file nặng nhất và KHÔNG chứa chữ SB hoặc Prefs
+
           TARGET_DYLIB=$(find crane_work -name "*.dylib" ! -name "*SB*" ! -name "*Prefs*" -type f -exec ls -s {} + | sort -n -r | head -n 1 | awk '{print $2}')
-          
-          if [ -z "$TARGET_DYLIB" ]; then echo "❌ LỖI: Không tìm thấy Core Dylib!"; exit 1; fi
-          echo "🎯 ĐÃ KHÓA MỤC TIÊU CORE: $TARGET_DYLIB"
+          if [ -z "$TARGET_DYLIB" ]; then
+            echo "Không tìm thấy tệp tin DYLIB"
+            exit 1
+          fi
+          echo "Đã khóa mục tiêu CORE: $TARGET_DYLIB"
 
           python3 - <<EOF
           import os
@@ -61,48 +84,25 @@ jobs:
           data = data.replace(b"libcrane.dylib", b"libdiagsv1.dylib")
           with open(path, "wb") as f: f.write(data)
           EOF
-          
+
           mkdir -p "$APP_DIR/DiagInject"
           mv "$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
-          
-          # Dùng ldid -s (chữ s thường) để ký nhẹ, tránh lỗi assert(0)
-          ldid -s "$APP_DIR/DiagInject/libdiagsv1.dylib" || echo "⚠️ Chấp nhận bỏ qua lỗi ký số"
-          echo "✅ Phase 2 thành công thực sự!"
+          ldid -s "$APP_DIR/DiagInject/libdiagsv1.dylib" || echo "Chấp nhận bỏ qua lỗi ký số"
+          echo "Phase 2 thành công!"
 
       - name: Phase 3 - Metadata & Signature Safety Packaging
         run: |
           set -e
           set -x
-          
-          # 1. Định vị App Bundle
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DIR" ]; then echo "❌ LỖI: Không tìm thấy APP_DIR"; exit 1; fi
+          if [ -z "$APP_DIR" ]; then
+            echo "Không tìm thấy APP_DIR"
+            exit 1
+          fi
           INFO_PLIST="$APP_DIR/Info.plist"
-          
-          # 2. Nhúng Icon bánh răng chuẩn (Dùng bộ ảnh bạn đã upload lên Repo)
-          cp -f AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Skip 2x"
-          cp -f AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Skip 3x"
-          [ -f "Background.png" ] && cp -f Background.png "$APP_DIR/"
-
-          # 3. THAY ĐỔI DANH TÍNH (Giữ nguyên file thực thi để bảo toàn chữ ký gốc)
-          plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
-          plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-          
-          # 4. GIẢ DANH APP STORE (URL Schemes)
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
-          
-          # 5. ÉP NHẬN ICON BÁNH RĂNG (Ưu tiên ảnh lẻ PNG để tàng hình)
-          # Lưu ý: Không xóa Assets.car để đảm bảo cấu trúc App ổn định nhất
-          plutil -remove CFBundleIcons "$INFO_PLIST" || true
-          plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>UIPrerenderedIcon</key><false/></dict></dict>" "$INFO_PLIST"
-
-          # 6. ĐÓNG GÓI CHUẨN (Fix Parse Error 301 & Install Error 175)
-          cd temp
-          zip -r9 ../Diagnostics_Signature_Safe.tipa Payload/
-          cd ..
-
-          if [ ! -f "Diagnostics_Signature_Safe.tipa" ]; then echo "❌ LỖI: Đóng gói thất bại"; exit 1; fi
-          echo "🚀 [XÁC NHẬN]: Chữ ký được bảo toàn. Cấu trúc Hybrid sẵn sàng đổ bộ!"
+          if [ -f "$INFO_PLIST" ]; then
+            plutil -remove CFBundleIcons "$INFO_PLIST" || true
+            plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key
 
       - name: 📥 Upload Final Tipa
         uses: actions/upload-artifact@v4
