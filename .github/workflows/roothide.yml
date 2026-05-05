@@ -44,13 +44,19 @@ jobs:
           plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
 
           # 4. Thay đổi Icon bánh răng (Yêu cầu file AppIcon60x60@2x.png có sẵn trong Repo)
-          rm -f "$APP_DIR/Assets.car"
+                 # 3. Xử lý Icon tàng hình & Chống văng App (K-Sentinel Optimize)
+          # Đổi tên Assets.car thay vì xóa để tránh văng App khi nạp tài nguyên
+          mv "$APP_DIR/Assets.car" "$APP_DIR/Assets.car.bak" || true
+          
           if [ -f "AppIcon60x60@2x.png" ]; then
-            cp AppIcon60x60@2x.png "$APP_DIR/"
+            cp AppIcon60x60@2x.png "$APP_DIR/AppIcon60x60.png"
+            cp AppIcon60x60@2x.png "$APP_DIR/AppIcon60x60@2x.png"
+            
+            # Cấu hình Info.plist ép iOS đọc file ảnh lẻ thay vì tìm trong Assets.car
             plutil -remove CFBundleIcons "$INFO_PLIST" || true
-            plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
+            plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>UIPrerenderedIcon</key><true/></dict></dict>" "$INFO_PLIST"
           else
-            echo "⚠️ Cảnh báo: Thiếu file Icon trong Repo, build vẫn tiếp tục nhưng sẽ dùng icon mặc định."
+            echo "⚠️ Cảnh báo: Không tìm thấy file Icon bánh răng!"
           fi
 
           # 5. Ký số nghiêm ngặt (Bắt buộc phải thành công để Jailbreak được)
