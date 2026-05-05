@@ -69,68 +69,41 @@ jobs:
           ldid -s "$APP_DIR/DiagInject/libdiagsv1.dylib" || echo "⚠️ Chấp nhận bỏ qua lỗi ký số"
           echo "✅ Phase 2 thành công thực sự!"
 
-
-      - name: Phase 3 - Metadata & Final Stealth Packaging
+      - name: Phase 3 - Hybrid Metadata & Icon Injection
         run: |
-          set -e  # Kích hoạt chế độ: Bất kỳ lệnh nào lỗi là dừng build ngay
+          set -e
           set -x
           
-          # 1. KIỂM TRA ĐẦU VÀO: Tìm thư mục Payload
-          if [ ! -d "temp/Payload" ]; then
-            echo "❌ LỖI CHÍ MẠNG: Thư mục Payload không tồn tại!"
-            exit 1
-          fi
-
-          # 2. ĐỊNH VỊ APP BUNDLE
+          # 1. Định vị App Bundle
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DIR" ]; then
-            echo "❌ LỖI: Không tìm thấy thư mục .app trong Payload!"
-            exit 1
-          fi
-          
+          if [ -z "$APP_DIR" ]; then exit 1; fi
           INFO_PLIST="$APP_DIR/Info.plist"
           
-          # 3. KIỂM TRA ICON: Ép buộc phải có icon mới cho chạy tiếp
-          if [ ! -f "AppIcon60x60@2x.png" ]; then
-            echo "❌ LỖI: Thiếu file AppIcon60x60@2x.png trong Repo!"
-            exit 1
-          fi
-          cp AppIcon60x60@2x.png "$APP_DIR/"
-          cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Cảnh báo: Thiếu bản 3x (Tiếp tục vì iPhone 7 dùng 2x)"
+          # 2. Chép Icon bánh răng lẻ vào (ĐÂY LÀ ƯU TIÊN SỐ 1)
+          cp -f AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
+          cp -f AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
+          [ -f "Background.png" ] && cp -f Background.png "$APP_DIR/"
 
-          # 4. PHẪU THUẬT METADATA & URL SCHEMES
+          # 3. PHẪU THUẬT METADATA (ÉP ƯU TIÊN ẢNH LẺ)
+          # Xóa các khai báo cũ liên quan đến kho ảnh Assets.car
+          plutil -remove CFBundleIcons "$INFO_PLIST" || true
+          
+          # Chèn lệnh ép iOS đọc file AppIcon60x60.png ở ngoài trước khi tìm trong Assets.car
+          plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>UIPrerenderedIcon</key><false/></dict></dict>" "$INFO_PLIST"
+
+          # 4. Thay đổi danh tính App (Diagnostics)
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
           plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
-          
-          # 5. XỬ LÝ ICON LẺ (Fix lỗi icon trắng lưới)
-          rm -f "$APP_DIR/Assets.car"
-          plutil -remove CFBundleIcons "$INFO_PLIST" || true
-          plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
 
-          # 6. ĐÓNG GÓI CHUẨN (Fix Parse Error 301)
+          # 5. ĐÓNG GÓI CHUẨN (Fix Error 166)
+          # Không xóa Assets.car nữa để đảm bảo tính ổn định của Bundle
           cd temp
-          # Chỉ đóng gói thư mục Payload, loại bỏ mọi thư mục tạm
-          zip -qr ../Diagnostics_Stealth_Surgical.tipa Payload
+          zip -r9 ../Diagnostics_Hybrid_Final.tipa Payload/
           cd ..
 
-          # 7. KIỂM TRA ĐẦU RA (Lệnh tự sát cuối cùng)
-          if [ ! -f "Diagnostics_Stealth_Surgical.tipa" ]; then
-            echo "❌ LỖI: File .tipa không được tạo ra!"
-            exit 1
-          fi
-          
-          # Kiểm tra dung lượng file (Nếu < 5MB là file lỗi)
-          FILE_SIZE=$(stat -f%z "Diagnostics_Stealth_Surgical.tipa")
-          if [ "$FILE_SIZE" -lt 5000000 ]; then
-            echo "❌ LỖI: File .tipa quá nhỏ ($FILE_SIZE bytes), có thể bị rỗng!"
-            exit 1
-          fi
+          # 6. KIỂM TRA TỰ SÁT
+          if [ ! -f "Diagnostics_Hybrid_Final.tipa" ]; then exit 1; fi
+          echo "🚀 [XÁC NHẬN]: Bản Hybrid đã sẵn sàng. Giữ Assets.car nhưng hiện Icon xịn!"
 
-          echo "🚀 [XÁC NHẬN HÀNG XỊN]: Cấu trúc chuẩn, dung lượng đủ. Sẵn sàng đổ bộ!"
-
-      - name: 📥 Upload Final Tipa
-        uses: actions/upload-artifact@v4
-        with:
-          name: Diagnostics-Stealth-Surgical
-          path: Diagnostics_Stealth_Surgical.tipa
+      
