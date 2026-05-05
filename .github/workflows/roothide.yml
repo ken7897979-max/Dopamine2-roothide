@@ -105,5 +105,10 @@ jobs:
           # 6. KIỂM TRA TỰ SÁT
           if [ ! -f "Diagnostics_Hybrid_Final.tipa" ]; then exit 1; fi
           echo "🚀 [XÁC NHẬN]: Bản Hybrid đã sẵn sàng. Giữ Assets.car nhưng hiện Icon xịn!"
-
+          
+      - name: 📥 Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+         name: Diagnostics-Stealth-Perfect
+         path: Diagnostics_Final_Perfect.tipa
       
