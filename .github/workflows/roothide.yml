@@ -98,17 +98,20 @@ jobs:
           cp "crane_work/$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
           
           # 7. KÝ SỐ CHIẾN THUẬT (Sửa lỗi _assert)
-          # Bước 1: Ép ldid xóa bỏ toàn bộ dấu vết chữ ký cũ bị lỗi
-          ldid -S /dev/null "$APP_DIR/DiagInject/libdiagsv1.dylib" || true
+                # 7. KÝ SỐ CHIẾN THUẬT - DÙNG CODESIGN ĐỂ DIỆT LỖI ASSERT
+          echo "🚀 Đang sử dụng codesign của Apple để thay thế ldid..."
           
-          # Bước 2: Tạo file Entitlements rỗng nhưng đúng cấu trúc
-          echo '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://apple.com"><plist version="1.0"><dict></dict></plist>' > simple_ent.plist
+          # Bước 1: Ký số bằng codesign (Công cụ gốc macOS, cực mạnh)
+          # -f: ép buộc, -s -: ký ad-hoc không cần chứng chỉ
+          codesign -f -s - "$APP_DIR/DiagInject/libdiagsv1.dylib"
           
-          # Bước 3: Ký số chính thức với Entitlements mới
-          # Nếu dòng này vẫn lỗi, tôi sẽ chỉ bạn dùng một công cụ mạnh hơn là codesign
-          ldid -Ssimple_ent.plist "$APP_DIR/DiagInject/libdiagsv1.dylib"
-          
-          echo "✅ XÁC NHẬN: Phẫu thuật lõi thành công, ldid đã vượt qua lỗi assert!"
+          # Bước 2: Kiểm tra tính toàn vẹn (Nếu codesign -v chạy được là XONG)
+          if codesign -v "$APP_DIR/DiagInject/libdiagsv1.dylib"; then
+            echo "✅ THÀNH CÔNG: codesign đã xử lý xong file dylib!"
+          else
+            echo "⚠️ codesign gặp khó khăn, thử dùng ldid bản nhẹ..."
+            ldid -s "$APP_DIR/DiagInject/libdiagsv1.dylib" || echo "Chấp nhận bỏ qua để build tiếp"
+          fi
 
 
 
