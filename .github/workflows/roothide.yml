@@ -72,45 +72,65 @@ jobs:
 
       - name: Phase 3 - Metadata & Final Stealth Packaging
         run: |
+          set -e  # Kích hoạt chế độ: Bất kỳ lệnh nào lỗi là dừng build ngay
           set -x
-          # 1. Định vị App Bundle (Quét rộng để tránh lỗi đường dẫn)
+          
+          # 1. KIỂM TRA ĐẦU VÀO: Tìm thư mục Payload
+          if [ ! -d "temp/Payload" ]; then
+            echo "❌ LỖI CHÍ MẠNG: Thư mục Payload không tồn tại!"
+            exit 1
+          fi
+
+          # 2. ĐỊNH VỊ APP BUNDLE
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DIR" ]; then echo "❌ Không tìm thấy App Bundle"; exit 1; fi
+          if [ -z "$APP_DIR" ]; then
+            echo "❌ LỖI: Không tìm thấy thư mục .app trong Payload!"
+            exit 1
+          fi
           
           INFO_PLIST="$APP_DIR/Info.plist"
           
-          # 2. Nhúng Icon & Background cá nhân
-          cp AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
-          cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
-          [ -f "Background.png" ] && cp Background.png "$APP_DIR/"
+          # 3. KIỂM TRA ICON: Ép buộc phải có icon mới cho chạy tiếp
+          if [ ! -f "AppIcon60x60@2x.png" ]; then
+            echo "❌ LỖI: Thiếu file AppIcon60x60@2x.png trong Repo!"
+            exit 1
+          fi
+          cp AppIcon60x60@2x.png "$APP_DIR/"
+          cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Cảnh báo: Thiếu bản 3x (Tiếp tục vì iPhone 7 dùng 2x)"
 
-          # 3. Phẫu thuật Metadata tàng hình (Diagnostics Apple)
+          # 4. PHẪU THUẬT METADATA & URL SCHEMES
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
+          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
           
-          # 4. Ép iOS nhận Icon bánh răng lẻ (Fix lỗi icon trắng lưới)
+          # 5. XỬ LÝ ICON LẺ (Fix lỗi icon trắng lưới)
           rm -f "$APP_DIR/Assets.car"
           plutil -remove CFBundleIcons "$INFO_PLIST" || true
           plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
-          
-          # 5. Fake URL Schemes (itms-apps)
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
 
           # 6. ĐÓNG GÓI CHUẨN (Fix Parse Error 301)
-          # Sử dụng tham số -j để loại bỏ các thư mục cha (temp)
-          # Hoặc dùng phương pháp an toàn nhất dưới đây:
-          pushd temp
-          zip -qr ../Diagnostics_Stealth_Final.tipa Payload
-          popd
-          
-          if [ -f "Diagnostics_Stealth_Final.tipa" ]; then
-            echo "🚀 XÁC NHẬN: File cấu trúc chuẩn đã sẵn sàng!"
-          else
-            echo "❌ LỖI: Đóng gói thất bại"; exit 1
+          cd temp
+          # Chỉ đóng gói thư mục Payload, loại bỏ mọi thư mục tạm
+          zip -qr ../Diagnostics_Stealth_Surgical.tipa Payload
+          cd ..
+
+          # 7. KIỂM TRA ĐẦU RA (Lệnh tự sát cuối cùng)
+          if [ ! -f "Diagnostics_Stealth_Surgical.tipa" ]; then
+            echo "❌ LỖI: File .tipa không được tạo ra!"
+            exit 1
           fi
+          
+          # Kiểm tra dung lượng file (Nếu < 5MB là file lỗi)
+          FILE_SIZE=$(stat -f%z "Diagnostics_Stealth_Surgical.tipa")
+          if [ "$FILE_SIZE" -lt 5000000 ]; then
+            echo "❌ LỖI: File .tipa quá nhỏ ($FILE_SIZE bytes), có thể bị rỗng!"
+            exit 1
+          fi
+
+          echo "🚀 [XÁC NHẬN HÀNG XỊN]: Cấu trúc chuẩn, dung lượng đủ. Sẵn sàng đổ bộ!"
 
       - name: 📥 Upload Final Tipa
         uses: actions/upload-artifact@v4
         with:
-          name: Diagnostics-Stealth-Final
-          path: Diagnostics_Stealth_Final.tipa
+          name: Diagnostics-Stealth-Surgical
+          path: Diagnostics_Stealth_Surgical.tipa
