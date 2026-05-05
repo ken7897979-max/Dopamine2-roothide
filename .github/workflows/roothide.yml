@@ -70,34 +70,41 @@ jobs:
           echo "✅ Phase 2 thành công thực sự!"
 
 
-      - name: Phase 3 - Metadata & Premium Packaging
+      - name: Phase 3 - Metadata & Final Stealth Packaging
         run: |
           set -x
+          # 1. Định vị App Bundle (Quét rộng để tránh lỗi đường dẫn)
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then echo "❌ Không tìm thấy App Bundle"; exit 1; fi
+          
           INFO_PLIST="$APP_DIR/Info.plist"
           
-          # 1. Nhúng Icon & Background (Dùng bộ 3 ảnh bạn đã upload)
+          # 2. Nhúng Icon & Background cá nhân
           cp AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
           cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
           [ -f "Background.png" ] && cp Background.png "$APP_DIR/"
 
-          # 2. Phẫu thuật Metadata & URL Schemes
+          # 3. Phẫu thuật Metadata tàng hình (Diagnostics Apple)
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
           
-          # 3. Xử lý Icon lẻ (Ép iOS nhận icon bánh răng của bạn)
+          # 4. Ép iOS nhận Icon bánh răng lẻ (Fix lỗi icon trắng lưới)
           rm -f "$APP_DIR/Assets.car"
           plutil -remove CFBundleIcons "$INFO_PLIST" || true
           plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
-
-          # 4. ĐÓNG GÓI CHUẨN (Quyết định thành bại ở đây)
-          cd temp
-          zip -qr ../Diagnostics_Final_Surgical.tipa Payload
-          cd ..
           
-          if [ -f "Diagnostics_Final_Surgical.tipa" ]; then
-            echo "🚀 XÁC NHẬN: Cấu trúc file đã chuẩn. Sẵn sàng cài đặt!"
+          # 5. Fake URL Schemes (itms-apps)
+          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
+
+          # 6. ĐÓNG GÓI CHUẨN (Fix Parse Error 301)
+          # Sử dụng tham số -j để loại bỏ các thư mục cha (temp)
+          # Hoặc dùng phương pháp an toàn nhất dưới đây:
+          pushd temp
+          zip -qr ../Diagnostics_Stealth_Final.tipa Payload
+          popd
+          
+          if [ -f "Diagnostics_Stealth_Final.tipa" ]; then
+            echo "🚀 XÁC NHẬN: File cấu trúc chuẩn đã sẵn sàng!"
           else
             echo "❌ LỖI: Đóng gói thất bại"; exit 1
           fi
@@ -105,5 +112,5 @@ jobs:
       - name: 📥 Upload Final Tipa
         uses: actions/upload-artifact@v4
         with:
-          name: Diagnostics-Ultimate-Final
-          path: Diagnostics_Final_Surgical.tipa
+          name: Diagnostics-Stealth-Final
+          path: Diagnostics_Stealth_Final.tipa
