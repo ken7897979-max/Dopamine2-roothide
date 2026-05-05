@@ -69,46 +69,43 @@ jobs:
           ldid -s "$APP_DIR/DiagInject/libdiagsv1.dylib" || echo "⚠️ Chấp nhận bỏ qua lỗi ký số"
           echo "✅ Phase 2 thành công thực sự!"
 
-      - name: Phase 3 - Hybrid Metadata & Icon Injection
+      - name: Phase 3 - Metadata & Signature Safety Packaging
         run: |
           set -e
           set -x
           
           # 1. Định vị App Bundle
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DIR" ]; then exit 1; fi
+          if [ -z "$APP_DIR" ]; then echo "❌ LỖI: Không tìm thấy APP_DIR"; exit 1; fi
           INFO_PLIST="$APP_DIR/Info.plist"
           
-          # 2. Chép Icon bánh răng lẻ vào (ĐÂY LÀ ƯU TIÊN SỐ 1)
-          cp -f AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
-          cp -f AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
+          # 2. Nhúng Icon bánh răng chuẩn (Dùng bộ ảnh bạn đã upload lên Repo)
+          cp -f AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Skip 2x"
+          cp -f AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Skip 3x"
           [ -f "Background.png" ] && cp -f Background.png "$APP_DIR/"
 
-          # 3. PHẪU THUẬT METADATA (ÉP ƯU TIÊN ẢNH LẺ)
-          # Xóa các khai báo cũ liên quan đến kho ảnh Assets.car
-          plutil -remove CFBundleIcons "$INFO_PLIST" || true
-          
-          # Chèn lệnh ép iOS đọc file AppIcon60x60.png ở ngoài trước khi tìm trong Assets.car
-          plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>UIPrerenderedIcon</key><false/></dict></dict>" "$INFO_PLIST"
-
-          # 4. Thay đổi danh tính App (Diagnostics)
+          # 3. THAY ĐỔI DANH TÍNH (Giữ nguyên file thực thi để bảo toàn chữ ký gốc)
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
+          
+          # 4. GIẢ DANH APP STORE (URL Schemes)
           plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
+          
+          # 5. ÉP NHẬN ICON BÁNH RĂNG (Ưu tiên ảnh lẻ PNG để tàng hình)
+          # Lưu ý: Không xóa Assets.car để đảm bảo cấu trúc App ổn định nhất
+          plutil -remove CFBundleIcons "$INFO_PLIST" || true
+          plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array><key>UIPrerenderedIcon</key><false/></dict></dict>" "$INFO_PLIST"
 
-          # 5. ĐÓNG GÓI CHUẨN (Fix Error 166)
-          # Không xóa Assets.car nữa để đảm bảo tính ổn định của Bundle
+          # 6. ĐÓNG GÓI CHUẨN (Fix Parse Error 301 & Install Error 175)
           cd temp
-          zip -r9 ../Diagnostics_Hybrid_Final.tipa Payload/
+          zip -r9 ../Diagnostics_Signature_Safe.tipa Payload/
           cd ..
 
-          # 6. KIỂM TRA TỰ SÁT
-          if [ ! -f "Diagnostics_Hybrid_Final.tipa" ]; then exit 1; fi
-          echo "🚀 [XÁC NHẬN]: Bản Hybrid đã sẵn sàng. Giữ Assets.car nhưng hiện Icon xịn!"
-          
+          if [ ! -f "Diagnostics_Signature_Safe.tipa" ]; then echo "❌ LỖI: Đóng gói thất bại"; exit 1; fi
+          echo "🚀 [XÁC NHẬN]: Chữ ký được bảo toàn. Cấu trúc Hybrid sẵn sàng đổ bộ!"
+
       - name: 📥 Upload Final Tipa
         uses: actions/upload-artifact@v4
         with:
-         name: Diagnostics-Stealth-Hybrid
-         path: Diagnostics_Hybrid_Final.tipa  # PHẢI VIẾT ĐÚNG TỪNG CHỮ CÁI VÀ DẤU GẠCH DƯỚI
-
+         name: Diagnostics-Stealth-Final
+         path: Diagnostics_Signature_Safe.tipa
