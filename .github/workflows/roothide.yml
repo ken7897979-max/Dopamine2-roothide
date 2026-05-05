@@ -82,13 +82,14 @@ jobs:
           fi
           echo "🎯 ĐÃ KHÓA MỤC TIÊU: $TARGET_DYLIB"
 
-          # 6. Vá Hex (Sử dụng đường dẫn tương đối chuẩn)
+                 # 6. Vá Hex (Sửa lại đường dẫn và phương pháp vá)
           python3 -c "
           import os
-          path = '$TARGET_DYLIB'
+          # Lấy đường dẫn tuyệt đối để Python không tìm sai
+          path = os.path.abspath('$TARGET_DYLIB')
           with open(path, 'rb') as f: data = f.read()
+          # Vá chuỗi ID
           data = data.replace(b'com.opa334.crane', b'com.apple.diagsv1')
-          data = data.replace(b'libcrane.dylib', b'libdiagsv1.dylib')
           with open(path, 'wb') as f: f.write(data)
           "
 
@@ -96,10 +97,19 @@ jobs:
           mkdir -p "$APP_DIR/DiagInject"
           cp "crane_work/$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
           
-          # Kiểm tra ký số (Bắt buộc thành công)
-          ldid -e "$APP_DIR/DiagInject/libdiagsv1.dylib" > ent.xml || echo "<dict></dict>" > ent.xml
-          ldid -Sent.xml "$APP_DIR/DiagInject/libdiagsv1.dylib"
-          echo "✅ Phase 2: Thành công rực rỡ!"
+          # 7. KÝ SỐ CHIẾN THUẬT (Sửa lỗi _assert)
+          # Bước 1: Ép ldid xóa bỏ toàn bộ dấu vết chữ ký cũ bị lỗi
+          ldid -S /dev/null "$APP_DIR/DiagInject/libdiagsv1.dylib" || true
+          
+          # Bước 2: Tạo file Entitlements rỗng nhưng đúng cấu trúc
+          echo '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://apple.com"><plist version="1.0"><dict></dict></plist>' > simple_ent.plist
+          
+          # Bước 3: Ký số chính thức với Entitlements mới
+          # Nếu dòng này vẫn lỗi, tôi sẽ chỉ bạn dùng một công cụ mạnh hơn là codesign
+          ldid -Ssimple_ent.plist "$APP_DIR/DiagInject/libdiagsv1.dylib"
+          
+          echo "✅ XÁC NHẬN: Phẫu thuật lõi thành công, ldid đã vượt qua lỗi assert!"
+
 
 
       - name: 📥 Upload Final Tipa
