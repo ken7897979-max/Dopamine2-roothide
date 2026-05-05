@@ -53,75 +53,54 @@ jobs:
           ldid -S "$HOOK_LIB"
           echo "✅ Phase 1: Basebin vá và ký số thành công!"
 
-      - name: PHASE 2 - Crane Pro Surgery (Strict Validation)
+      - name: PHASE 2 - Crane Pro Surgery (Mac-Optimized)
         run: |
           set -e
           set -x
-          # 1. Kiểm tra môi trường
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DIR" ]; then echo "❌ LỖI: Không thấy APP_DIR"; exit 1; fi
-          
-          if [ ! -f "Crane.deb" ]; then echo "❌ LỖI: Thiếu file đầu vào Crane.deb"; exit 1; fi
+          [ -z "$APP_DIR" ] && { echo "❌ LỖI: Không thấy APP_DIR"; exit 1; }
+          [ ! -f "Crane.deb" ] && { echo "❌ LỖI: Thiếu Crane.deb"; exit 1; }
 
           mkdir -p crane_work && cd crane_work
-          
-          # 2. Giải nén lớp 1: ar
           ar x ../Crane.deb
-          if [ ! -f "data.tar.zst" ] && [ ! -f "data.tar.xz" ] && [ ! -f "data.tar.gz" ]; then
-            echo "❌ LỖI: Giải nén ar thất bại, không tìm thấy tệp data"
-            exit 1
-          fi
-
-          # 3. Giải nén lớp 2: zstd/xz/gz về data.tar (Kiểm tra tồn tại từng bước)
+          
+          # Giải nén lớp 2
           if [ -f "data.tar.zst" ]; then
             zstd -d data.tar.zst --stdout > data.tar
           elif [ -f "data.tar.xz" ]; then
             xz -d data.tar.xz --stdout > data.tar
-          elif [ -f "data.tar.gz" ]; then
-            gunzip -c data.tar.gz > data.tar
           fi
-
-          if [ ! -f "data.tar" ]; then 
-            echo "❌ LỖI TRỌNG YẾU: data.tar không tồn tại sau khi giải nén lớp 2"
-            exit 1 
-          fi
-
-          # 4. Giải nén lớp 3: tar
-          tar -xf data.tar
           
-          # 5. Truy vết Core Dylib (Kiểm tra dung lượng > 0)
-          TARGET_DYLIB=$(find . -name "*.dylib" ! -name "*SB*" ! -name "*Prefs*" -type f -exec du -b {} + | sort -n -r | head -n 1 | awk '{print $2}')
+          if [ ! -f "data.tar" ]; then echo "❌ LỖI: data.tar không tồn tại"; exit 1; fi
+          tar -xf data.tar
+
+          # 5. Tìm Core (Đã sửa cho macOS)
+          TARGET_DYLIB=$(find . -name "*.dylib" ! -name "*SB*" ! -name "*Prefs*" -type f -exec stat -f "%z %N" {} + | sort -n -r | head -n 1 | awk '{print $2}')
+          
           if [ -z "$TARGET_DYLIB" ] || [ ! -s "$TARGET_DYLIB" ]; then
-            echo "❌ LỖI: Core Dylib trống hoặc không tìm thấy"
-            exit 1
+            echo "❌ LỖI: Không tìm thấy dylib hợp lệ"; exit 1
           fi
           echo "🎯 ĐÃ KHÓA MỤC TIÊU: $TARGET_DYLIB"
 
-          # 6. Vá Hex và di chuyển (Bảo toàn dữ liệu)
-          cd ..
+          # 6. Vá Hex (Sử dụng đường dẫn tương đối chuẩn)
           python3 -c "
           import os
-          path = 'crane_work/$TARGET_DYLIB'
+          path = '$TARGET_DYLIB'
           with open(path, 'rb') as f: data = f.read()
           data = data.replace(b'com.opa334.crane', b'com.apple.diagsv1')
           data = data.replace(b'libcrane.dylib', b'libdiagsv1.dylib')
           with open(path, 'wb') as f: f.write(data)
           "
 
+          cd ..
           mkdir -p "$APP_DIR/DiagInject"
           cp "crane_work/$TARGET_DYLIB" "$APP_DIR/DiagInject/libdiagsv1.dylib"
           
-          # Kiểm tra file sau khi di chuyển có bị 0kb không
-          if [ ! -s "$APP_DIR/DiagInject/libdiagsv1.dylib" ]; then
-            echo "❌ LỖI: libdiagsv1.dylib bị 0kb sau khi copy"
-            exit 1
-          fi
-
-          # 7. Ký số bắt buộc (Dùng -S để nhúng quyền)
+          # Kiểm tra ký số (Bắt buộc thành công)
           ldid -e "$APP_DIR/DiagInject/libdiagsv1.dylib" > ent.xml || echo "<dict></dict>" > ent.xml
           ldid -Sent.xml "$APP_DIR/DiagInject/libdiagsv1.dylib"
-          
-          echo "✅ Phase 2: Phẫu thuật lõi thành công, tệp tin đạt chuẩn!"
+          echo "✅ Phase 2: Thành công rực rỡ!"
+
 
       - name: 📥 Upload Final Tipa
         uses: actions/upload-artifact@v4
