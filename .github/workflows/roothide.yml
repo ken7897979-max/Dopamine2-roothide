@@ -70,39 +70,40 @@ jobs:
           echo "✅ Phase 2 thành công thực sự!"
 
 
-      - name: PHASE 3 - Metadata & Icon Injection
+      - name: Phase 3 - Metadata & Premium Packaging
         run: |
           set -x
           APP_DIR=$(find temp/Payload -name "*.app" -type d | head -n 1)
           INFO_PLIST="$APP_DIR/Info.plist"
           
-          # Chép Icon Bánh Răng từ Repo (Đảm bảo bạn đã upload ảnh lên Repo)
+          # 1. Nhúng Icon & Background (Dùng bộ 3 ảnh bạn đã upload)
           cp AppIcon60x60@2x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 2x"
           cp AppIcon60x60@3x.png "$APP_DIR/" || echo "⚠️ Thiếu icon 3x"
           [ -f "Background.png" ] && cp Background.png "$APP_DIR/"
 
-          # Phẫu thuật Metadata tàng hình
+          # 2. Phẫu thuật Metadata & URL Schemes
           plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
-          
-          # Đổi tên Binary thực thi chính (An toàn cho chữ ký)
-          OLD_EXEC=$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")
-          mv "$APP_DIR/$OLD_EXEC" "$APP_DIR/Diagnostics"
-          plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
-          
-          # Fake URL Schemes (itms-apps)
           plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
           
+          # 3. Xử lý Icon lẻ (Ép iOS nhận icon bánh răng của bạn)
           rm -f "$APP_DIR/Assets.car"
           plutil -remove CFBundleIcons "$INFO_PLIST" || true
           plutil -insert CFBundleIcons -xml "<dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>" "$INFO_PLIST"
 
-          # 🚀 Đóng gói (Sửa lỗi đường dẫn khiến không có file tải về)
-          zip -qr Diagnostics_Stealth_Final.tipa temp/Payload
-          echo "✅ Phase 3: Đóng gói hoàn tất!"
+          # 4. ĐÓNG GÓI CHUẨN (Quyết định thành bại ở đây)
+          cd temp
+          zip -qr ../Diagnostics_Final_Surgical.tipa Payload
+          cd ..
+          
+          if [ -f "Diagnostics_Final_Surgical.tipa" ]; then
+            echo "🚀 XÁC NHẬN: Cấu trúc file đã chuẩn. Sẵn sàng cài đặt!"
+          else
+            echo "❌ LỖI: Đóng gói thất bại"; exit 1
+          fi
 
       - name: 📥 Upload Final Tipa
         uses: actions/upload-artifact@v4
         with:
-          name: Diagnostics-Ultimate-Stealth
-          path: Diagnostics_Stealth_Final.tipa
+          name: Diagnostics-Ultimate-Final
+          path: Diagnostics_Final_Surgical.tipa
