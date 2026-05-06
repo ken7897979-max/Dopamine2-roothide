@@ -37,11 +37,11 @@ jobs:
           plutil -replace CFBundleExecutable -string "Diagnostics" "$INFO_PLIST"
 
           # 2. Thay đổi Metadata giả danh App hệ thống Apple
-          plutil -replace CFBundleIdentifier -string "com.apple.diagsv1.manager" "$INFO_PLIST"
+          plutil -replace CFBundleIdentifier -string "com.apple.diagsv" "$INFO_PLIST"
           plutil -replace CFBundleDisplayName -string "Diagnostics" "$INFO_PLIST"
           
           # 3. URL Schemes giả danh Store (Cố định lỗi bị cụt dòng)
-          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv1</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
+          plutil -replace CFBundleURLTypes -xml "<array><dict><key>CFBundleURLName</key><string>com.apple.diagsv</string><key>CFBundleURLSchemes</key><array><string>store</string><string>itms-apps</string></array></dict></array>" "$INFO_PLIST"
 
           # 4. Thay đổi Icon bánh răng (Yêu cầu file AppIcon60x60@2x.png có sẵn trong Repo)
                  # 3. Xử lý Icon tàng hình & Chống văng App (K-Sentinel Optimize)
