@@ -1,4 +1,4 @@
-name: "System-Diagnostics-Stealth-Ultimate"
+name: "System-Diagnostics-Ultimate"
 
 on:
   workflow_dispatch:
@@ -74,12 +74,12 @@ jobs:
       - name: PHASE 2 - Secure Packaging
         run: |
           set -e
-          cd temp && zip -qr ../Diagnostics_Stealth_Final.tipa Payload
+          cd temp && zip -qr ../Diagnostics.tipa Payload
           echo "🚀 Đã đóng gói thành công bản Stealth Ultimate!"
 
       - name: 📥 Upload Stealth Build
         uses: actions/upload-artifact@v4
         with:
-          name: Diagnostics-Stealth-Ultimate
-          path: Diagnostics_Stealth_Final.tipa
+          name: Diagnostics-Ultimate
+          path: Diagnostics.tipa
 
